@@ -1,0 +1,236 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Import the Training and Testing Data Sets:
+
+```{r}
+library(readr)
+train <- read_csv("C:/Users/anant/Desktop/ML Project/train.csv")
+test <- read_csv("C:/Users/anant/Desktop/ML Project/test.csv")
+```
+
+Coverting the label column to the type factor:
+
+```{r}
+train$label  <- as.factor(train$label)
+
+```
+
+
+Exploratory Data Analysis:
+
+Number of Entries and Features in the Training Sets:
+
+```{r}
+dim(train)
+
+```
+
+Number of Entries and Features in the Testing Set:
+
+```{r}
+dim(test)
+
+```
+
+Let us now visualize the number of each digit in the training set:
+
+```{r}
+p1 <- ggplot(train, aes(x =label, color = label))+ geom_bar(stat = "Count", fill = "white") 
+p1
+
+```
+
+But it would be great to know the actual numbers too:
+
+The Following Table Distribution of digits in the Training Set:
+
+```{r}
+cat("Distribution in Training Set:\n")
+table(train$label)
+
+```
+
+A good starting Point before we develop the models would be to visualize the digits in the datase:
+
+```{r}
+
+digits_vis <- sample(1:nrow(train),25)
+
+
+digits<- t(train[digits_vis,-1])
+digits_matrix <- lapply(1:25,function(x) matrix(digits[,x],ncol=28))
+
+
+par(mfrow=c(5,5),mar=c(.1,.1,.1,.1))
+
+for(i in 1:25) 
+{
+  for(j in 1:28) 
+    {
+    digits_matrix[[i]][j,] <- rev(digits_matrix[[i]][j,])
+    }
+  
+  image(digits_matrix[[i]],col=grey.colors(225), axes = FALSE)
+}
+
+```
+
+Splitting the Dataset into Training and Testing Sets:
+```{r}
+pd <- sample(2,nrow(train),replace = TRUE, prob=c(0.8,0.2))
+train_df <-  train[pd==1,]
+test_df  <-  train[pd==2,]
+
+```
+
+Data Preproccessing:
+
+```{r}
+library(caret)
+nzr <- nearZeroVar(train_df[,-1],saveMetrics=T,freqCut=10000/1,uniqueCut=1/7)
+sum(nzr$zeroVar)
+
+```
+
+Total Number :
+
+```{r}
+sum(nzr$nzv)
+
+```
+
+```{r}
+cutvar <- rownames(nzr[nzr$nzv==TRUE,])
+var <- setdiff(names(train_df),cutvar)
+train_df <- train_df[,var]
+
+```
+
+PCA with Data : 
+
+```{r}
+label <- as.factor(train_df[[1]])
+train_df$label <- NULL
+train_df <- train_df/255
+covtrain <- cov(train_df)
+
+```
+
+Number of Components Representaive of the Dataset:
+
+```{r}
+train_pc <- prcomp(covtrain)
+varex <- train_pc$sdev^2/sum(train_pc$sdev^2)
+varcum <- cumsum(varex)
+result <- data.frame(num=1:length(train_pc$sdev),
+                         ex=varex,
+                         cum=varcum)
+
+plot(result$num,result$cum,type="b",xlim=c(0,100),
+     main="Variance Explained by Top 100 Components",
+     xlab="Number of Components",ylab="Variance Explained")
+abline(v=25,lty=2)
+
+```
+
+Plotting the Principal Components :
+
+```{r}
+train_score <- as.matrix(train_df) %*% train_pc$rotation[,1:25]
+train_df <- cbind(label,as.data.frame(train_score))
+
+colors <- rainbow(length(unique(train_df$label)))
+names(colors) <- unique(train_df$label)
+
+plot(train_df$PC1,train_df$PC2,type="n",main="First Two Principal Components")
+text(train_df$PC1,train_df$PC2,label=train_df$label,col=colors[train_df$label])
+```
+
+
+Random Forest:
+
+```{r}
+library(randomForest)
+rf_model <- randomForest(label~.,data = train_df, ntree = 100)
+summary(rf_model)
+```
+
+Prediction Based on Random Forests:
+
+```{r}
+newtest1 <- test_df[,-1]
+newtest1 <- newtest1[,var[-1]]/255
+newtest1 <- as.matrix(newtest1) %*% train_pc$rotation[,1:25]
+newtest1 <- as.data.frame(newtest1)
+pred <- predict(rf_model,newtest1)
+```
+
+Confusion Matrix:
+
+```{r}
+table1 <- table(pred,test_df$label)
+print(table1)
+```
+
+Accuracy: 
+
+```{r}
+Accuracy <- sum(diag(table1))/nrow(test_df)
+Accuracy
+
+```
+
+K-Nearest neigbbours:
+
+```{r}
+library(class)
+model.knn <- knn(train = train_df[,-1], test = newtest1,cl = train_df$label, k=7)
+
+table2 <- table(`Actual Class` = test_df$label, `Predicted Class` = model.knn)
+
+```
+
+Confusion Matrix for KNN:
+
+```{r}
+print(table2)
+Accuracy2 <- sum(diag(table2))/nrow(test_df)
+Accuracy2
+```
+
+Descision Tree:
+
+```{r}
+model.rpart <- rpart(label~., method = "class", data = train_df)
+
+```
+
+Printing the Tree:
+
+```{r}
+plot(model.rpart, uniform = TRUE, main = "Classification (RPART). Tree of Handwritten Digit Recognition ")
+text(model.rpart, all = TRUE, cex = 0.75)
+
+```
+
+Predictions:
+
+```{r}
+prediction.rpart <- predict(model.rpart, newdata = test_df, type = "class")
+table3 <-table(`Actual Class` = test_df$label, `Predicted Class` = prediction.rpart)
+print(table3)
+
+```
+
+Accuracy:
+
+```{r}
+Accuracy3 <- sum(diag(table3))/nrow(test_df)
+Accuracy3
+
+```
+
+

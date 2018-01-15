@@ -1,0 +1,162 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Installing the MXNet R Package:
+
+```{r}
+cran <- getOption("repos")
+cran["dmlc"] <- "https://apache-mxnet.s3-accelerate.dualstack.amazonaws.com/R/CRAN/"
+options(repos = cran)
+install.packages("mxnet")
+```
+
+Installing the Required Libraries:
+
+```{r}
+install.packages('beepr')
+```
+
+```{r}
+install.packages('h2o')
+```
+
+```{r}
+library(beepr)
+library(h2o)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(mxnet)
+h2o.init(nthreads = 4)
+
+```
+
+Importing the dataset:
+
+```{r}
+train <- read.csv("D:/Work/MachineLearning/Project/Data/train.csv")
+```
+
+Converting the features to numeric type:
+
+```{r}
+
+for(i in 1:ncol(train))
+{
+  train[[i]] <- as.numeric(train[[i]])
+}
+
+train<-train[order(train[[1]]),]
+train_label=as.numeric(factor(train[[1]]))-1
+train<-as.matrix(cbind(train_label,train[,-1]))
+
+
+```
+
+Making Table with count of each value in target varible:
+
+```{r}
+num<-train %>% data.frame() %>% group_by(train_label)%>% summarise(count=n())
+
+tab<-cbind(c(1,cumsum(num$count)[-10]),
+           cumsum(num$count))
+w <- NULL
+for(i in 1:10)
+{
+  w<-c(w,sample(tab[i,1]:tab[i,2],3000))
+}
+
+```
+
+Scaling the Values of the Pixels for both the training and testing sets:
+
+```{r}
+test<-data.frame(train_label=factor(train_label[-w]),train[-w,-1]/255) 
+train <- data.frame(train_label=factor(train_label[w]),train[w,-1]/255)
+```
+
+Converting the dataframes to matrices:
+
+```{r}
+train<-data.matrix(train)
+test<-data.matrix(test)
+
+Xtrain<-train[,-1]
+Ytrain<-train[,1]-1
+Xtrain<-t(Xtrain)
+
+test_org<-test #original test data
+test<-test[,-1]
+test<-t(test)
+```
+
+Transforming the data:
+
+```{r}
+train.array <- Xtrain
+dim(train.array) <- c(28, 28, 1, ncol(Xtrain))
+test.array <- test
+dim(test.array) <- c(28, 28, 1, ncol(test))
+
+```
+
+Making the ARchitecture of the Convolutional Neural Network:
+
+```{r}
+data <- mx.symbol.Variable("data")
+devices<-mx.cpu()
+
+#1st convolution Layer
+conv1 <- mx.symbol.Convolution(data=data, kernel=c(5,5), num_filter=20)
+relu1 <- mx.symbol.Activation(data=conv1, act_type="relu")
+pool1 <- mx.symbol.Pooling(data=relu1, pool_type="max",  kernel=c(2,2), stride=c(2,2))
+drop1 <- mx.symbol.Dropout(data=pool1,p=0.5)
+
+#2nd convolution layer
+conv2 <- mx.symbol.Convolution(data=drop1, kernel=c(5,5), num_filter=50)
+relu2 <- mx.symbol.Activation(data=conv2, act_type="relu")
+pool2 <- mx.symbol.Pooling(data=relu2, pool_type="max",    kernel=c(2,2), stride=c(2,2))
+drop2 <- mx.symbol.Dropout(data=pool2,p=0.5)
+
+#st fully connected layer
+flatten <- mx.symbol.Flatten(data=drop2)
+fc1 <- mx.symbol.FullyConnected(data=flatten, num_hidden=800)
+relu3 <- mx.symbol.Activation(data=fc1, act_type="relu")
+drop3 <- mx.symbol.Dropout(data=relu3,p=0.5)
+
+#2nd fully connected layer
+fc2 <- mx.symbol.FullyConnected(data=drop3, num_hidden=10)
+
+#Final softmax output:
+mnnet <- mx.symbol.SoftmaxOutput(data=fc2)
+
+mx.set.seed(0)
+```
+
+
+Training the Model:
+
+```{r}
+
+model <- mx.model.FeedForward.create(mnnet, X=train.array, y=Ytrain,
+                                      eval.data= list(data=test.array, label=test_org[,1]-1),
+                                      ctx=devices, num.round=30, array.batch.size=100,
+                                      learning.rate=0.05, momentum=0.8, wd=0.00001,
+                                      eval.metric=mx.metric.accuracy,
+                                      epoch.end.callback=mx.callback.log.train.metric(100)) 
+#[30] Train-accuracy=0.985800000000001
+#[30] Testing-accuracy=0.991404958677685
+```
+
+Making the Predictions on the Testing Set:
+
+```{r}
+predClass <- predict(model, test.array)
+predClass.label <- max.col(t(predClass)) - 1
+table(test_org[,1]-1,predClass.label)
+a1 <- sum(diag(table(test_org[,1]-1,predClass.label)))/nrow(test_org)
+print(a1)
+```
+
